@@ -107,9 +107,18 @@ async function loadDatabase() {
     const arrayBuffer = await res.arrayBuffer();
     const uint8 = new Uint8Array(arrayBuffer);
     
-    // Descompressão usando fflate CDN
-    const decompressed = fflate.gunzipSync(uint8);
-    const text = new TextDecoder('utf-8').decode(decompressed);
+    let text;
+    // Verifica se os bytes iniciais batem com o cabeçalho Gzip (0x1f, 0x8b)
+    if (uint8[0] === 0x1f && uint8[1] === 0x8b) {
+      // É gzip, descompacta no cliente
+      const decompressed = fflate.gunzipSync(uint8);
+      text = new TextDecoder('utf-8').decode(decompressed);
+      console.log(`[Banco] Descompactado no cliente. Sigla Gzip detectada.`);
+    } else {
+      // Já foi descompactado transparentemente pela CDN/Servidor
+      text = new TextDecoder('utf-8').decode(uint8);
+      console.log(`[Banco] Carregado diretamente como texto. Decompressão automática pela CDN.`);
+    }
 
     allRecords = text.split('\n')
       .filter(l => l.trim())
