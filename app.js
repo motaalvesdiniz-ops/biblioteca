@@ -1,10 +1,14 @@
 /**
- * app.js — Cliente de busca do acervo IUSDATA / Koha
+ * app.js — Cliente de busca estática do acervo IUSDATA / Koha
+ * Toda a busca, processamento e exportações ocorrem 100% no navegador (Client-Side).
  */
 
 'use strict';
 
 // ─── Estado local da busca ───
+let allRecords = [];
+let currentFilteredRecords = [];
+
 let currentQuery = '';
 let currentPage = 1;
 let currentLimit = 15;
@@ -14,8 +18,8 @@ let advancedFilters = {
   title: '',
   author: '',
   subject: '',
-  year: '',
   mfn: '',
+  year: '',
   lang: ''
 };
 
@@ -82,13 +86,57 @@ document.addEventListener('DOMContentLoaded', () => {
   const hasAnyQuery = currentQuery || advancedFilters.title || advancedFilters.author || advancedFilters.subject || advancedFilters.mfn || advancedFilters.year;
   if (btnClear) btnClear.style.display = hasAnyQuery ? 'block' : 'none';
 
-  // Se houver uma busca válida na URL, executa. Senão, inicia em branco.
-  if (isSearchValid()) {
-    performSearch();
-  } else {
-    showEmptyState();
-  }
+  // Carrega o acervo a partir do gzip
+  loadDatabase();
 });
+
+// ─── Carregamento da Base de Dados Gzip ───
+async function loadDatabase() {
+  resetView();
+  const loadingBox = document.getElementById('loading-box');
+  if (loadingBox) {
+    loadingBox.style.display = 'block';
+    loadingBox.querySelector('p').textContent = 'Carregando acervo bibliográfico (16MB)...';
+  }
+
+  try {
+    const start = Date.now();
+    const res = await fetch('data/records.jsonl.gz');
+    if (!res.ok) throw new Error('Não foi possível carregar o arquivo records.jsonl.gz. Certifique-se de que ele está na pasta data/.');
+
+    const arrayBuffer = await res.arrayBuffer();
+    const uint8 = new Uint8Array(arrayBuffer);
+    
+    // Descompressão usando fflate CDN
+    const decompressed = fflate.gunzipSync(uint8);
+    const text = new TextDecoder('utf-8').decode(decompressed);
+
+    allRecords = text.split('\n')
+      .filter(l => l.trim())
+      .map(l => { try { return JSON.parse(l); } catch { return null; } })
+      .filter(Boolean);
+
+    console.log(`[Banco] ${allRecords.length} registros carregados no cliente em ${Date.now() - start}ms.`);
+    
+    if (loadingBox) loadingBox.style.display = 'none';
+
+    // Se a busca inicial na URL for válida, processa
+    if (isSearchValid()) {
+      performSearch();
+    } else {
+      showEmptyState();
+    }
+  } catch (err) {
+    console.error(err);
+    if (loadingBox) {
+      loadingBox.innerHTML = `
+        <div style="color:var(--accent-red); font-size:2.5rem; margin-bottom:1rem;">⚠️</div>
+        <h3 style="color:var(--accent-red); font-family:var(--font-title); font-size:1.4rem; margin-bottom:0.5rem;">Erro ao Inicializar</h3>
+        <p style="font-size:0.85rem; color:var(--text-secondary); max-width:500px; margin:0 auto;">${err.message}</p>
+      `;
+    }
+  }
+}
 
 // ─── Manipuladores de busca ───
 function handleSearchSubmit(event) {
@@ -156,7 +204,7 @@ function resetView() {
   document.getElementById('active-filters').style.display = 'none';
 }
 
-// ─── Execução da Busca ───
+// ─── Execução da Busca Local ───
 async function performSearch() {
   if (!isSearchValid()) {
     showValidationError();
@@ -165,48 +213,109 @@ async function performSearch() {
 
   resetView();
   document.getElementById('loading-box').style.display = 'block';
+  document.getElementById('loading-box').querySelector('p').textContent = 'Processando busca...';
 
-  // Garante a exibição do grid com barra lateral de filtros facetados
-  const sidebar = document.getElementById('sidebar-facets');
-  if (sidebar) sidebar.style.display = 'block';
-  
-  const container = document.querySelector('.main-container');
-  if (container) {
-    container.style.gridTemplateColumns = '280px 1fr';
-  }
+  // Executa de forma assíncrona sutil para não travar a UI no carregamento
+  setTimeout(() => {
+    const q = currentQuery.toLowerCase().trim();
+    const title = advancedFilters.title.toLowerCase().trim();
+    const author = advancedFilters.author.toLowerCase().trim();
+    const subject = advancedFilters.subject.toLowerCase().trim();
+    const mfn = advancedFilters.mfn.trim();
+    const year = advancedFilters.year.trim();
+    const lang = (activeFacets.lang || advancedFilters.lang || '').toUpperCase().trim();
+    const activeYear = activeFacets.year;
+    const activeSubject = activeFacets.subject;
 
-  // Constrói URL com parâmetros
-  const params = new URLSearchParams();
-  params.append('page', currentPage);
-  params.append('limit', currentLimit);
+    let filtered = allRecords;
 
-  // Parâmetro de busca geral ou específica
-  if (currentQuery) {
-    params.append('q', currentQuery);
-  } else {
-    if (advancedFilters.title) params.append('title', advancedFilters.title);
-    if (advancedFilters.author) params.append('author', advancedFilters.author);
-    if (advancedFilters.subject) params.append('subject', advancedFilters.subject);
-    if (advancedFilters.mfn) params.append('mfn', advancedFilters.mfn);
-    if (advancedFilters.year) params.append('year', advancedFilters.year);
-    if (advancedFilters.lang) params.append('lang', advancedFilters.lang);
-  }
+    // Busca geral ou filtros detalhados
+    if (q) {
+      filtered = filtered.filter(r => {
+        return (r.titulo && r.titulo.toLowerCase().includes(q)) ||
+               (r.autor && r.autor.toLowerCase().includes(q)) ||
+               (r.assunto && r.assunto.toLowerCase().includes(q)) ||
+               (r.periodico && r.periodico.toLowerCase().includes(q)) ||
+               (r.mfn && String(r.mfn).includes(q)) ||
+               (r.ano && String(r.ano).includes(q));
+      });
+    } else {
+      if (title) filtered = filtered.filter(r => r.titulo && r.titulo.toLowerCase().includes(title));
+      if (author) filtered = filtered.filter(r => r.autor && r.autor.toLowerCase().includes(author));
+      if (subject) filtered = filtered.filter(r => r.assunto && r.assunto.toLowerCase().includes(subject));
+      if (year) filtered = filtered.filter(r => r.ano && String(r.ano) === year);
+      if (mfn) filtered = filtered.filter(r => r.mfn && String(r.mfn) === mfn);
+    }
 
-  // Filtros facetados adicionados na lateral
-  if (activeFacets.year) params.append('year', activeFacets.year);
-  if (activeFacets.subject) params.append('subject', activeFacets.subject);
-  if (activeFacets.lang) params.append('lang', activeFacets.lang);
+    // Filtros adicionais (facetados e idiomas)
+    if (lang) {
+      filtered = filtered.filter(r => r.idioma && r.idioma.toUpperCase() === lang);
+    }
+    if (activeYear) {
+      filtered = filtered.filter(r => r.ano && String(r.ano) === activeYear);
+    }
+    if (activeSubject) {
+      filtered = filtered.filter(r => {
+        if (!r.assunto) return false;
+        const subs = r.assunto.split(';').map(s => s.trim().toLowerCase());
+        return subs.includes(activeSubject.toLowerCase());
+      });
+    }
 
-  try {
-    const res = await fetch(`/api/search?${params.toString()}`);
-    if (!res.ok) throw new Error('Erro de resposta do servidor');
+    // Cacheia filtrados para a exportação
+    currentFilteredRecords = filtered;
+
+    // Estatísticas e facetas para filtros laterais
+    const facets = {
+      years: {},
+      languages: {},
+      subjects: {}
+    };
+
+    filtered.forEach(r => {
+      if (r.ano) facets.years[r.ano] = (facets.years[r.ano] || 0) + 1;
+      if (r.idioma) facets.languages[r.idioma] = (facets.languages[r.idioma] || 0) + 1;
+      if (r.assunto) {
+        const subs = r.assunto.split(';').map(s => s.trim()).filter(Boolean);
+        subs.forEach(s => {
+          facets.subjects[s] = (facets.subjects[s] || 0) + 1;
+        });
+      }
+    });
+
+    const limitFacets = (obj, max = 15) => {
+      return Object.entries(obj)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, max)
+        .reduce((acc, [k, v]) => { acc[k] = v; return acc; }, {});
+    };
+
+    const total = filtered.length;
+    const startIdx = (currentPage - 1) * currentLimit;
+    const paginated = filtered.slice(startIdx, startIdx + currentLimit);
+
+    // Garante a exibição do grid com barra lateral de filtros facetados
+    const sidebar = document.getElementById('sidebar-facets');
+    if (sidebar) sidebar.style.display = 'block';
     
-    const data = await res.json();
-    renderResults(data);
-  } catch (err) {
-    console.error(err);
-    showErrorState();
-  }
+    const container = document.querySelector('.main-container');
+    if (container) {
+      container.style.gridTemplateColumns = '280px 1fr';
+    }
+
+    renderResults({
+      total,
+      page: currentPage,
+      limit: currentLimit,
+      pages: Math.ceil(total / currentLimit),
+      facets: {
+        years: limitFacets(facets.years, 15),
+        languages: limitFacets(facets.languages, 8),
+        subjects: limitFacets(facets.subjects, 15)
+      },
+      results: paginated
+    });
+  }, 30);
 }
 
 // ─── Renderização dos Resultados ───
@@ -378,7 +487,6 @@ function removeFilter(type, key) {
     activeFacets[key] = null;
   } else if (type === 'adv') {
     advancedFilters[key] = '';
-    // Limpa o input visual também
     const el = document.getElementById(`search-${key}`);
     if (el) el.value = '';
   }
@@ -457,21 +565,27 @@ async function viewMarcXml(mfn) {
   const modal = document.getElementById('marc-modal');
   const codeEl = document.getElementById('marc-xml-code');
   
-  codeEl.textContent = 'Carregando ficha MARCXML...';
+  codeEl.textContent = 'Gerando ficha MARCXML...';
   modal.classList.add('open');
 
-  try {
-    const res = await fetch(`/api/record/${mfn}/koha`);
-    if (!res.ok) throw new Error('Não foi possível carregar o XML');
-    const xml = await res.text();
-    codeEl.textContent = xml;
-    
-    document.getElementById('btn-download-record-xml').onclick = () => {
-      downloadMarcXml(mfn);
-    };
-  } catch (err) {
-    codeEl.textContent = 'Erro ao carregar os dados: ' + err.message;
+  const record = allRecords.find(r => String(r.mfn) === String(mfn));
+  if (!record) {
+    codeEl.textContent = 'Erro: Registro não encontrado no acervo.';
+    return;
   }
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<collection xmlns="http://www.loc.gov/MARC21/slim"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://www.loc.gov/MARC21/slim http://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd">
+${convertToMarcXml(record)}
+</collection>`;
+
+  codeEl.textContent = xml;
+  
+  document.getElementById('btn-download-record-xml').onclick = () => {
+    downloadMarcXml(mfn);
+  };
 }
 
 function closeMarcModal() {
@@ -487,34 +601,31 @@ function copyMarcXml() {
 }
 
 function downloadMarcXml(mfn) {
-  window.open(`/api/record/${mfn}/koha`, '_blank');
+  const record = allRecords.find(r => String(r.mfn) === String(mfn));
+  if (!record) return;
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<collection xmlns="http://www.loc.gov/MARC21/slim"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://www.loc.gov/MARC21/slim http://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd">
+${convertToMarcXml(record)}
+</collection>`;
+  
+  downloadBlob(xml, `mfn_${mfn}.xml`, 'application/xml;charset=utf-8');
 }
 
-// ─── Utils ───
-function fmtNum(n) {
-  return (n || 0).toLocaleString('pt-BR');
+function downloadBlob(content, filename, contentType) {
+  const blob = new Blob([content], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
-function escapeHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function escapeAttribute(str) {
-  if (!str) return '';
-  return String(str).replace(/'/g, "\\'");
-}
-
-function showErrorState() {
-  document.getElementById('loading-box').style.display = 'none';
-  alert('Ocorreu um erro ao comunicar com a API de busca. Verifique se o servidor local do site está ativo.');
-}
-
-// ─── Lógica do Dropdown e Exportação ───
+// ─── Lógica do Dropdown e Exportação Local ───
 function toggleExportDropdown(event) {
   if (event) event.stopPropagation();
   const dropdown = document.getElementById('export-results-container');
@@ -530,40 +641,170 @@ function triggerExport(format, event) {
   exportResults(format);
 }
 
-function getSearchQueryString() {
-  const params = new URLSearchParams();
-  
-  if (currentQuery) {
-    params.append('q', currentQuery);
-  } else {
-    if (advancedFilters.title) params.append('title', advancedFilters.title);
-    if (advancedFilters.author) params.append('author', advancedFilters.author);
-    if (advancedFilters.subject) params.append('subject', advancedFilters.subject);
-    if (advancedFilters.mfn) params.append('mfn', advancedFilters.mfn);
-    
-    // Prioriza filtros de faceta se houver
-    const yearVal = activeFacets.year || advancedFilters.year;
-    if (yearVal) params.append('year', yearVal);
-    
-    const langVal = activeFacets.lang || advancedFilters.lang;
-    if (langVal) params.append('lang', langVal);
+function exportResults(format) {
+  if (currentFilteredRecords.length === 0) {
+    alert('Nenhum resultado filtrado para exportar.');
+    return;
   }
 
-  // Permite filtros adicionais de faceta para busca geral ou avançada
-  if (currentQuery) {
-    if (activeFacets.year) params.append('year', activeFacets.year);
-    if (activeFacets.subject) params.append('subject', activeFacets.subject);
-    if (activeFacets.lang) params.append('lang', activeFacets.lang);
-  } else {
-    if (activeFacets.subject) params.append('subject', activeFacets.subject);
+  if (format === 'json') {
+    const jsonStr = JSON.stringify(currentFilteredRecords, null, 2);
+    downloadBlob(jsonStr, 'iusdata_export.json', 'application/json;charset=utf-8');
+  } else if (format === 'xml') {
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+    xml += '<collection xmlns="http://www.loc.gov/MARC21/slim"\n';
+    xml += '            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n';
+    xml += '            xsi:schemaLocation="http://www.loc.gov/MARC21/slim http://www.loc.gov/standards/marcxml/schema/MARC21slim.xsd">\n';
+    
+    // Limita exportações gigantes a 10.000 para estabilidade do navegador
+    const records = currentFilteredRecords.slice(0, 10000);
+    for (const r of records) {
+      xml += convertToMarcXml(r) + '\n';
+    }
+    xml += '</collection>\n';
+    downloadBlob(xml, 'iusdata_export.xml', 'application/xml;charset=utf-8');
+  } else if (format === 'pdf') {
+    exportPdfLocal();
   }
-  
-  return params.toString();
 }
 
-function exportResults(format) {
-  const qs = getSearchQueryString();
-  window.open(`/api/export?format=${format}&${qs}`, '_blank');
+function exportPdfLocal() {
+  // Limita exportações gigantes a 1000 itens para o PDF não quebrar o print do browser
+  const records = currentFilteredRecords.slice(0, 1000);
+  const filterDesc = [];
+  if (currentQuery) filterDesc.push(`Geral: "${currentQuery}"`);
+  if (advancedFilters.title) filterDesc.push(`Título: "${advancedFilters.title}"`);
+  if (advancedFilters.author) filterDesc.push(`Autor: "${advancedFilters.author}"`);
+  if (advancedFilters.subject) filterDesc.push(`Assunto: "${advancedFilters.subject}"`);
+  if (advancedFilters.year) filterDesc.push(`Ano: "${advancedFilters.year}"`);
+  if (advancedFilters.mfn) filterDesc.push(`MFN: "${advancedFilters.mfn}"`);
+  if (activeFacets.lang || advancedFilters.lang) filterDesc.push(`Idioma: "${activeFacets.lang || advancedFilters.lang}"`);
+  
+  const filterStr = filterDesc.length > 0 ? filterDesc.join(', ') : 'Todos os registros';
+  
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    alert('Por favor, ative os pop-ups para visualizar o relatório de impressão.');
+    return;
+  }
+  
+  const listHtml = records.map((r, i) => {
+    let details = [];
+    if (r.volume) details.push(`v. ${r.volume}`);
+    if (r.numero) details.push(`n. ${r.numero}`);
+    if (r.paginas) details.push(`p. ${r.paginas}`);
+    const detailsStr = details.length > 0 ? details.join(', ') : '';
+
+    return `
+      <div class="print-item">
+        <div class="item-header">
+          <span class="item-num">#${i + 1} (MFN ${r.mfn})</span>
+          <span class="item-lang-year">${r.idioma || ''} ${r.ano ? `| ${r.ano}` : ''}</span>
+        </div>
+        <div class="item-title">${escapeHtml(r.titulo || r.rawText || '—')}</div>
+        ${r.autor ? `<div class="item-author">Autor: ${escapeHtml(r.autor)}</div>` : ''}
+        ${r.periodico ? `
+          <div class="item-source">
+            Periódico: <strong>${escapeHtml(r.periodico)}</strong> ${r.local ? `(${escapeHtml(r.local)})` : ''} ${detailsStr ? `— ${escapeHtml(detailsStr)}` : ''}
+          </div>
+        ` : ''}
+        ${r.assunto ? `<div class="item-subjects">Assuntos: ${escapeHtml(r.assunto)}</div>` : ''}
+      </div>
+    `;
+  }).join('\n');
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Relatório de Pesquisa - FDUSP</title>
+  <style>
+    body {
+      font-family: 'Times New Roman', Georgia, serif;
+      color: #000;
+      line-height: 1.4;
+      padding: 1.5cm 1cm;
+      font-size: 10.5pt;
+    }
+    .print-header {
+      border-bottom: 2px solid #000;
+      padding-bottom: 0.5rem;
+      margin-bottom: 1cm;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .print-title {
+      font-size: 14pt;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    .print-subtitle {
+      font-size: 8.5pt;
+      color: #444;
+      margin-top: 5px;
+    }
+    .print-meta {
+      text-align: right;
+      font-size: 8.5pt;
+    }
+    .print-item {
+      margin-bottom: 0.8cm;
+      page-break-inside: avoid;
+    }
+    .item-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 8.5pt;
+      color: #555;
+      border-bottom: 1px dashed #ccc;
+      padding-bottom: 2px;
+      margin-bottom: 4px;
+    }
+    .item-title {
+      font-size: 11pt;
+      font-weight: bold;
+      margin-bottom: 3px;
+    }
+    .item-author, .item-source, .item-subjects {
+      font-size: 9pt;
+      margin-top: 2px;
+    }
+    @media print {
+      @page {
+        size: A4;
+        margin: 2cm 1.5cm;
+      }
+      body {
+        padding: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-header">
+    <div>
+      <div class="print-title">Biblioteca da Faculdade de Direito da USP</div>
+      <div class="print-subtitle">Filtros: ${escapeHtml(filterStr)} | Total: ${records.length} registros</div>
+    </div>
+    <div class="print-meta">
+      Gerado em: ${new Date().toLocaleDateString('pt-BR')}<br>
+      Ficha Catalográfica Koha (IUSDATA)
+    </div>
+  </div>
+  
+  <div class="print-list">
+    ${listHtml}
+  </div>
+</body>
+</html>`;
+
+  printWindow.document.write(html);
+  printWindow.document.close();
+  
+  setTimeout(() => {
+    printWindow.print();
+  }, 500);
 }
 
 // Fecha o dropdown se clicar em qualquer lugar fora dele
@@ -628,4 +869,96 @@ function showValidationError() {
       <p>Preencha pelo menos um dos filtros de busca (Busca Geral, Título, Autor, Assunto ou Ano) com no mínimo <strong>3 caracteres</strong>, ou preencha o campo <strong>MFN</strong> com o número do código desejado. Buscas vazias ou genéricas não são permitidas.</p>
     </div>
   `;
+}
+
+// Helpers de Geração MARCXML para Koha no cliente
+function convertToMarcXml(record) {
+  const parts = [];
+  parts.push('  <record>');
+  parts.push('    <leader>00000nam a2200000i 4500</leader>');
+  
+  if (record.mfn) {
+    parts.push(`    <controlfield tag="001">${escapeXml(record.mfn)}</controlfield>`);
+  }
+  
+  const dateStr = new Date().toISOString().slice(2, 8).replace(/-/g, '');
+  const yearStr = record.ano && /^\d{4}$/.test(record.ano) ? record.ano : '    ';
+  const langStr = record.idioma && record.idioma.length === 3 ? record.idioma.toLowerCase() : 'por';
+  const f008 = `${dateStr}s${yearStr}    br |||||||||||||||${langStr} d`;
+  parts.push(`    <controlfield tag="008">${f008}</controlfield>`);
+  
+  if (record.autor) {
+    parts.push('    <datafield tag="100" ind1="1" ind2=" ">');
+    parts.push(`      <subfield code="a">${escapeXml(record.autor)}</subfield>`);
+    parts.push('    </datafield>');
+  }
+  
+  parts.push('    <datafield tag="245" ind1="1" ind2="0">');
+  parts.push(`      <subfield code="a">${escapeXml(record.titulo)}</subfield>`);
+  if (record.autor) {
+    parts.push(`      <subfield code="c">${escapeXml(record.autor)}</subfield>`);
+  }
+  parts.push('    </datafield>');
+  
+  if (record.local || record.ano) {
+    parts.push('    <datafield tag="260" ind1=" " ind2=" ">');
+    if (record.local) parts.push(`      <subfield code="a">${escapeXml(record.local)}</subfield>`);
+    if (record.ano) parts.push(`      <subfield code="c">${escapeXml(record.ano)}</subfield>`);
+    parts.push('    </datafield>');
+  }
+  
+  if (record.paginas) {
+    parts.push('    <datafield tag="300" ind1=" " ind2=" ">');
+    parts.push(`      <subfield code="a">${escapeXml(record.paginas)}</subfield>`);
+    parts.push('    </datafield>');
+  }
+  
+  if (record.assunto) {
+    const subjects = record.assunto.split(';').map(s => s.trim()).filter(Boolean);
+    for (const s of subjects) {
+      parts.push('    <datafield tag="650" ind1=" " ind2="4">');
+      parts.push(`      <subfield code="a">${escapeXml(s)}</subfield>`);
+      parts.push('    </datafield>');
+    }
+  }
+  
+  if (record.periodico) {
+    parts.push('    <datafield tag="773" ind1="0" ind2="8">');
+    parts.push(`      <subfield code="t">${escapeXml(record.periodico)}</subfield>`);
+    let detail = '';
+    if (record.volume) detail += `v. ${record.volume}, `;
+    if (record.numero) detail += `n. ${record.numero}, `;
+    if (record.paginas) detail += `p. ${record.paginas}`;
+    detail = detail.trim().replace(/,$/, '');
+    if (detail) parts.push(`      <subfield code="g">${escapeXml(detail)}</subfield>`);
+    parts.push('    </datafield>');
+  }
+  
+  if (record.biblioteca) {
+    parts.push('    <datafield tag="852" ind1=" " ind2=" ">');
+    parts.push(`      <subfield code="b">${escapeXml(record.biblioteca)}</subfield>`);
+    parts.push('    </datafield>');
+  }
+  
+  parts.push('  </record>');
+  return parts.join('\n');
+}
+
+// ─── Utils ───
+function fmtNum(n) {
+  return (n || 0).toLocaleString('pt-BR');
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function escapeAttribute(str) {
+  if (!str) return '';
+  return String(str).replace(/'/g, "\\'");
 }
