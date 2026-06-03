@@ -1,0 +1,12 @@
+{
+  "name": "iusdata-direito-koha-search",
+  "version": "1.0.0",
+  "description": "Portal de Pesquisa Bibliográfica - Faculdade de Direito USP / Koha",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

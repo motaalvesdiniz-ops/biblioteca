@@ -1,0 +1,10 @@
+# Dependências locais
+node_modules/
+
+# Logs e arquivos temporários
+*.log
+.DS_Store
+Thumbs.db
+
+# Banco descompactado gigante (subiremos a versão compactada .gz de 16MB)
+data/records.jsonl

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Acervo Biblioteca FDUSP — Pesquisa Koha</title>
+  <meta name="description" content="Portal de pesquisa bibliográfica do acervo IUSDATA migrado para o sistema Koha da Faculdade de Direito da USP" />
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300..900;1,300..900&family=Montserrat:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ─── Top Bar USP ─── -->
+  <div class="usp-topbar">
+    <div class="usp-topbar-inner">
+      <a href="https://direito.usp.br" target="_blank">Faculdade de Direito</a>
+      <a href="https://biblifd.direito.usp.br" target="_blank">Biblioteca</a>
+      <a href="https://usp.br" target="_blank">USP</a>
+    </div>
+  </div>
+
+  <!-- ─── Header ─── -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="header-brand">
+        <a href="https://direito.usp.br" target="_blank" class="header-logo-link">
+          <img src="https://direito.usp.br/imagens/Faculdade-de-Direito-Universidade-de-Sao-Paulo.svg" alt="Faculdade de Direito - Universidade de São Paulo" class="header-logo" />
+        </a>
+        <div class="header-titles">
+          <a href="/" style="text-decoration: none; color: inherit;">
+            <h1 class="header-title">Pesquisa Bibliográfica</h1>
+          </a>
+          <p class="header-subtitle">Acervo Histórico IUSDATA (Integração Koha)</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <!-- Removido botão de exportar catálogo geral do topo -->
+      </div>
+    </div>
+    <div class="header-accent-strip"></div>
+  </header>
+
+  <!-- ─── Hero Banner / Search Input & Advanced Filters ─── -->
+  <section class="search-hero">
+    <div class="search-hero-inner">
+      <h2 class="search-hero-title">Encontre artigos, teses e periódicos</h2>
+      <p class="search-hero-subtitle">Busca avançada e filtros de catalogação da Faculdade de Direito da USP</p>
+      
+      <form id="search-form" class="search-panel" onsubmit="handleSearchSubmit(event)">
+        <!-- Campo Geral -->
+        <div class="search-box-wrap">
+          <div class="search-input-container">
+            <svg class="search-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input type="text" id="search-input" placeholder="Pesquise por termos gerais..." aria-label="Termo geral" />
+            <button type="button" class="btn-clear-search" id="btn-clear" onclick="clearSearch()" style="display:none;">&times;</button>
+          </div>
+          <button type="submit" class="btn-search-submit">Buscar</button>
+        </div>
+
+        <!-- Filtros Avançados / Pesquisa Específica -->
+        <div class="search-advanced-grid">
+          <div class="adv-field">
+            <label for="search-title">Título</label>
+            <input type="text" id="search-title" placeholder="Ex: direito civil" />
+          </div>
+          <div class="adv-field">
+            <label for="search-author">Autor</label>
+            <input type="text" id="search-author" placeholder="Ex: Reale, Miguel" />
+          </div>
+          <div class="adv-field">
+            <label for="search-subject">Assunto</label>
+            <input type="text" id="search-subject" placeholder="Ex: filosofia do direito" />
+          </div>
+          <div class="adv-field">
+            <label for="search-mfn">Código / MFN</label>
+            <input type="number" id="search-mfn" min="1" placeholder="Ex: 85" />
+          </div>
+          <div class="adv-field">
+            <label for="search-year">Ano</label>
+            <input type="number" id="search-year" min="1900" max="2030" placeholder="Ex: 1995" />
+          </div>
+          <div class="adv-field">
+            <label for="search-lang">Idioma</label>
+            <select id="search-lang">
+              <option value="">Todos</option>
+              <option value="POR">Português (POR)</option>
+              <option value="SPA">Espanhol (SPA)</option>
+              <option value="ENG">Inglês (ENG)</option>
+              <option value="ITA">Italiano (ITA)</option>
+              <option value="FRE">Francês (FRE)</option>
+              <option value="GER">Alemão (GER)</option>
+            </select>
+          </div>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ─── Main Content ─── -->
+  <main class="main-container">
+    
+    <!-- Sidebar Filtros / Facetas -->
+    <aside class="sidebar" id="sidebar-facets">
+      <div class="sidebar-header">
+        <h3>Filtrar Resultados</h3>
+        <button class="btn-clear-filters" onclick="resetFilters()">Limpar tudo</button>
+      </div>
+
+      <!-- Filtros Ativos -->
+      <div class="active-filters-box" id="active-filters" style="display: none;">
+        <!-- Injetado dinamicamente -->
+      </div>
+
+      <!-- Faceta: Ano -->
+      <div class="facet-group">
+        <h4>Ano de Publicação</h4>
+        <div class="facet-list" id="facet-years"></div>
+      </div>
+
+      <!-- Faceta: Assunto -->
+      <div class="facet-group">
+        <h4>Assunto / Descritor</h4>
+        <div class="facet-list" id="facet-subjects"></div>
+      </div>
+
+      <!-- Faceta: Idioma -->
+      <div class="facet-group">
+        <h4>Idioma</h4>
+        <div class="facet-list" id="facet-languages"></div>
+      </div>
+    </aside>
+
+    <!-- Lista de Resultados -->
+    <section class="results-container">
+      <div class="results-header" id="results-meta">
+        <span class="results-count" id="results-count">Buscando acervo...</span>
+        
+        <!-- Dropdown Exportar Resultados -->
+        <div class="export-dropdown" id="export-results-container" style="display: none;">
+          <button class="btn-export-trigger" id="btn-export-trigger" onclick="toggleExportDropdown(event)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13" style="margin-right: 5px; vertical-align: -1px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Exportar resultado
+            <span class="dropdown-arrow">▼</span>
+          </button>
+          <div class="export-dropdown-menu" id="export-dropdown-menu">
+            <a href="#" onclick="triggerExport('pdf', event)">📄 Documento PDF</a>
+            <a href="#" onclick="triggerExport('xml', event)">💾 Formato MARCXML</a>
+            <a href="#" onclick="triggerExport('json', event)">🗄️ Formato JSON</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Empty State -->
+      <div class="empty-box" id="empty-box" style="display: none;">
+        <div class="empty-icon">🔍</div>
+        <h3>Nenhum resultado encontrado</h3>
+        <p>Não encontramos registros que correspondam aos filtros ou termos selecionados. Tente limpar a busca ou mudar os filtros.</p>
+      </div>
+
+      <!-- Loading State -->
+      <div class="loading-box" id="loading-box">
+        <div class="spinner"></div>
+        <p>Buscando no acervo...</p>
+      </div>
+
+      <!-- Feed de Resultados -->
+      <div class="results-list" id="results-list"></div>
+
+      <!-- Paginação -->
+      <nav class="pagination" id="pagination"></nav>
+    </section>
+  </main>
+
+  <!-- ─── Modal Ficha MARC XML ─── -->
+  <div class="modal" id="marc-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Ficha Catalográfica MARC21 (MARCXML)</h3>
+        <button class="btn-close-modal" onclick="closeMarcModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-intro">Ficha gerada de acordo com o padrão internacional MARC 21 (SLIM Schema do Library of Congress). Pronto para importação no Koha.</p>
+        <div class="xml-viewer-container">
+          <pre><code id="marc-xml-code">Carregando XML...</code></pre>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="copyMarcXml()">Copiar XML</button>
+        <button class="btn btn-primary" id="btn-download-record-xml">Baixar Arquivo .xml</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <p>© 2026 Faculdade de Direito - Universidade de São Paulo. Todos os direitos reservados.</p>
+      <p style="font-size: 0.72rem; margin-top: 5px; color: var(--text-muted);">Acervo bibliográfico integrado e exportado em padrão MARCXML (Koha).</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
