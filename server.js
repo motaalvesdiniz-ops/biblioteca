@@ -21,7 +21,7 @@ const app = express();
 const PORT = process.env.PORT || 3838; // Usando porta 3838 para não conflitar com scraper (3737)
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname));
 
 // Memória para busca rápida
 let allRecords = [];
@@ -476,7 +476,7 @@ function convertToMarcXml(record) {
 
 // Serve a página principal
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.listen(PORT, () => {
